@@ -1,0 +1,221 @@
+#include <Adafruit_NeoPixel.h>
+#include "Wire.h"
+#include <MPU6050_light.h>
+#include <millisDelay.h>
+#include <loopTimer.h> 
+
+#ifdef __AVR__
+  #include <avr/power.h>
+#endif
+
+#define PIXEL_PIN  6 // Neo rings pin
+#define POW_PIN    2 // Loding animation
+#define CONF_PIN   3 // Chaseing talse
+#define STA_PIN    4 // Start the test
+#define NUMPIXELS 36 // Number of pixels
+#define DELAYVAL 500
+
+// Classes 
+Adafruit_NeoPixel pixels(NUMPIXELS, PIXEL_PIN, NEO_RGBW + NEO_KHZ800);
+MPU6050 mpu(Wire);
+
+///////////////////////// color //////////////////////
+uint32_t red = pixels.Color(250, 14, 14); 
+uint32_t greenishwhite = pixels.Color(0, 64, 0, 64);
+uint32_t blue = pixels.Color(236, 63, 238);
+uint32_t yellow = pixels.Color(255, 245, 0);
+
+// Countor: counting how many erros
+int num_errors = 0;
+
+// Set a timer to control the loop function
+millisDelay testJob;
+
+unsigned long delayStart = 0; // the time the delay started
+unsigned long timer = 0;
+
+/////////////////////////// Setup ///////////////////////////
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  mpu.begin();
+  pixels.begin();
+  pixels.setBrightness(50);
+  
+  // Calibrate accelerometer and gyroscope
+  Serial.println(F("Calibrating. Do not move."));
+  mpu.calcOffsets(true,true);
+  
+  // Configure buttons as inputs and enable the internal pull-up resistor
+  pinMode(POW_PIN, INPUT_PULLUP);
+  pinMode(CONF_PIN, INPUT_PULLUP);
+  pinMode(STA_PIN, INPUT_PULLUP);
+}
+
+////////////////////////// Loop ////////////////////////////////
+void loop() {
+  //read the pushbutton value into a variable
+  int powerPin = digitalRead(POW_PIN);     // Loading
+  int calibratePin = digitalRead(CONF_PIN);  // Chasing tale
+  int testBalancePin = digitalRead(STA_PIN);   // Soild light flash
+  
+  // Power button pressed. Run power on light sequence
+  if (powerPin == LOW) {
+    Serial.println("Power on.");
+    powerOn();
+  }
+
+  // Calibrate button pressed. Run calibrate light sequence
+  if (calibratePin == LOW) {
+    // Calibrate accelerometer and gyroscope
+    Serial.println(F("Calibrating..."));
+    mpu.calcOffsets(true,true);
+    Serial.println(F("Finished calibrating."));
+    theaterChase(blue);
+  }
+  
+  // Test button pressed. Start test job.
+  if (testBalancePin == LOW) {
+    Serial.println("Testing balance...");
+    testJob.start(20000); // timer: 20 secs 
+  }
+
+  // Test is running. Call test balance function
+  if (testJob.isRunning()) {
+    test_balance();
+  }
+
+  // Test has finished. Update lights for success or failure.
+  if (testJob.justFinished()) {
+    Serial.println("Finished running test.");
+    Serial.println(num_errors);
+
+    // Show success or failure lights
+    if (num_errors >= 10) {
+      Serial.println("FAILED!");
+      fail();
+    }
+    else {
+      Serial.println("PASSED!");
+      pass();
+    }
+    // Reset error countor
+    num_errors = 0;
+  }
+}
+
+////////////////////////// Funtions //////////////////////////////
+void test_balance() {
+  // Update gyro and accelo values
+  mpu.update();
+  // Take a reading every half a second
+  if (millis() - timer > 500) {
+    float angleX = mpu.getAngleX();
+    float angleY = mpu.getAngleY();
+    float angleZ = mpu.getAngleZ();
+    Serial.println(angleX);
+    Serial.println(angleY);
+    Serial.println(angleZ);
+
+    // Increment error count if angle is off by some amount
+    if (angleX <= -20 || angleX >= 20 ||
+        angleY <= -20 || angleY >= 20 ||
+        angleZ <= -20 || angleZ >= 20) {
+      num_errors++;
+    }
+    //loopTimer.check(Serial); // Be able to make it run mutil tasks
+    timer = millis();
+    rainbow();
+  }
+}
+
+
+/////////////////////////// ANIMATION /////////////////////////// 
+//Loading
+void theaterChase(uint32_t color) {
+  for(int a=0; a<10; a++) {  // Repeat 10 times...
+    for(int b=0; b<3; b++) { //  'b' counts from 0 to 2...
+      pixels.clear();         //   Set all pixels in RAM to 0 (off)
+      // 'c' counts up from 'b' to end of pixels in steps of 3...
+      for(int c=b; c<pixels.numPixels(); c += 3) {
+        pixels.setPixelColor(c, color); // Set pixel 'c' to value 'color'
+      }
+      pixels.show(); // Update pixels with new contents
+      delay(100);  
+    }
+  }
+}
+
+//power on
+void powerOn() {
+    for(int i=0; i<NUMPIXELS; i++) {
+    pixels.setPixelColor(i, pixels.Color(236, 63, 238));
+    pixels.show();
+    delay(100);
+    }
+}
+
+// Rainbow-enhanced theater marquee. Pass delay time (in ms) between frames.
+void theaterChaseRainbow() {
+  int firstPixelHue = 0;     // First pixel starts at red (hue 0)
+  for(int a=0; a<30; a++) {  // Repeat 30 times...
+    for(int b=0; b<3; b++) { //  'b' counts from 0 to 2...
+      pixels.clear();         //   Set all pixels in RAM to 0 (off)
+      // 'c' counts up from 'b' to end of pixels in increments of 3...
+      for(int c=b; c<pixels.numPixels(); c += 3) {
+        // hue of pixel 'c' is offset by an amount to make one full
+        // revolution of the color wheel (range 65536) along the length
+        // of the pixels (pixels.numPixels() steps):
+        int      hue   = firstPixelHue + c * 65536L / pixels.numPixels();
+        uint32_t color = pixels.gamma32(pixels.ColorHSV(hue)); // hue -> RGB
+        pixels.setPixelColor(c, color); // Set pixel 'c' to value 'color'
+      }
+      pixels.show();                // Update pixels with new contents
+      //ledDelay.start(wait);                 // Pause for a moment
+      firstPixelHue += 65536 / 90; // One cycle of color wheel over 90 frames
+    }
+  }
+}
+
+// During test: rainbow cycle along whole strip
+void rainbow() {
+  for(long firstPixelHue = 0; firstPixelHue < 1*65536; firstPixelHue += 256) {
+    for(int i=0; i<pixels.numPixels(); i++) { // For each pixel in strip...
+      // Offset pixel hue by an amount to make one full revolution of the
+      // color wheel (range of 65536) along the length of the strip
+      // (strip.numPixels() steps):
+      int pixelHue = firstPixelHue + (i * 65536L / pixels.numPixels());
+      // strip.ColorHSV() can take 1 or 3 arguments: a hue (0 to 65535) or
+      // optionally add saturation and value (brightness) (each 0 to 255).
+      // Here we're using just the single-argument hue variant. The result
+      // is passed through strip.gamma32() to provide 'truer' colors
+      // before assigning to each pixel:
+      pixels.setPixelColor(i, pixels.gamma32(pixels.ColorHSV(pixelHue)));
+    }
+    pixels.show(); // Update strip with new contents
+    //ledDelay.start(10);
+    //delay(10);  // Pause for a moment                                                                                                                            
+  }
+}
+
+//after test - PASS: green light
+void pass() {
+  //ledDelay.start(50);
+  //delay(50);
+  for(int i=0; i<NUMPIXELS; i++){
+        pixels.setPixelColor(i, pixels.Color(236,   63, 10)); //green
+        pixels.show();
+    } 
+}
+
+//after test - FAIL: red light
+void fail() {
+  //ledDelay.start(50);
+  //delay(50);
+  for(int i=0; i<NUMPIXELS; i++){
+        pixels.setPixelColor(i, pixels.Color(0,   255, 2)); //red
+        pixels.show();
+    }
+}
+
+ 
