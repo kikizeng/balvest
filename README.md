@@ -1,2 +1,3 @@
 # balvest
-The project is for academic purpose designed for concussion assessment.
+
+This project is for QUT DNB315 Wearable Product, assist AFL / contact sport players concussion assessment.
